@@ -120,7 +120,7 @@ unsigned int bcd2dec ( unsigned int bcd, int digits )
 #endif
 
 
-int is_ore_ignored ( unsigned int saddr )
+int is_ore_ignored ( unsigned long saddr )
 {
 #ifdef HASORE
    int j = 0;
@@ -373,7 +373,7 @@ WEIGHT1:  BWR101,BWR102
 */
 
 /* Channel modes */
-enum {CM0, CM1, CM2, CM3};
+enum {CM0, CM1, CM2, CM3, CM4};
 
 /* Battery modes */
 enum {BM0, BM1, BM2, BM3, BM4};
@@ -416,6 +416,12 @@ static struct oregon_st {
    {60,   8, 0xff, 0xff, 0xea, 0x7c, 1, CM0, BM1, 0, 0,   1, 0xff, 4, "ORE_UV1",   OreUV1,     csWHL },
    {60,   8, 0xff, 0xff, 0xea, 0x4c, 1, CM1, BM1, 0, 0,   1, 0xff, 4, "ORE_T2",    OreTemp2,   csw   },
    {60,   8, 0xff, 0xff, 0xca, 0x48, 1, CM1, BM1, 0, 0,   1, 0xff, 4, "ORE_T3",    OreTemp3,   csw   },
+   /* pseudo units for rfxtrx */
+   {56,   7, 0xff, 0xff, 0xea, 0xea, 1, CM4, BM4, 0, 0,   1, 0xff, 4, "ORE_RFXTEMP",    OreRfxTemp,   csNull   },
+   {72,   9, 0xff, 0xff, 0xea, 0xeb, 2, CM4, BM4, 0, 0,   1, 0xff, 4, "ORE_RFXTH",    OreRfxTH,   csNull   },
+   {88,  11, 0xff, 0xff, 0xea, 0xec, 2, CM0, BM4, 0, 0,   1, 0xff, 4, "ORE_RFXRAIN",    OreRfxRain,   csNull   },
+   {88,  11, 0xff, 0xff, 0xea, 0xed, 3, CM0, BM4, 0, 0,   1, 0xff, 4, "ORE_RFXWIND",    OreRfxWind,   csNull   },
+   {56,   7, 0xff, 0xff, 0xea, 0xee, 1, CM0, BM4, 0, 0,   1, 0xff, 4, "ORE_RFXUV",    OreRfxUV,   csNull   },
    {56,   7, 0x0f, 0x00, 0x0c, 0x00, 1, CM0, BM0, 0, 0,   1, 0xf0, 2, "ORE_WGT1",  OreWeight1, csWgt1},
    {64,   8, 0xff, 0x80, 0xea, 0x00, 1, CM0, BM3, 0, 0,   1, 0xff, 3, "ELS_ELEC1", OreElec1,   cse   },
    {108, 11, 0xff, 0x00, 0x1a, 0x00, 2, CM3, BM0, 0, 0,   1, 0xff, 3, "OWL_ELEC2", OreElec2,   cs12  },
@@ -458,6 +464,15 @@ unsigned char battery_status ( char *batstr, unsigned char *batlvl,
       case BM3 :  /* Electrisave */
          status = (buf[1] & 0x10) ? ORE_LOBAT : 0;
          break;
+      case BM4 :  /* RFXTRX */
+         status = ORE_BATLVL;
+         *batlvl = (buf[6] & 0x0fu) + 1;
+	 if (*batlvl > 10) 
+	   *batlvl = 10;
+         sprintf(batstr, "BatLvl %d%% ", *batlvl * 10);
+         if ( (*batlvl * 10) <= configp->ore_lobat )
+            status |= ORE_LOBAT;
+         break;
       default :
          status = 0;
          break;
@@ -495,6 +510,10 @@ unsigned char channelval( char *chstr, unsigned char *buf, unsigned char mode )
             case 0x30 : chval = 3; sprintf(chstr, "Ch 3 "); break;
             default :   chval = 0; sprintf(chstr, "Ch ? "); break;
          }
+         break;
+      case CM4: /* RFXTRX */
+	chval = buf[2];
+	sprintf(chstr, "Ch %d ", chval);
          break;
       default :
          chval = 0;
@@ -580,7 +599,7 @@ char *translate_oregon( unsigned char *buf, unsigned char *sunchanged, int *laun
    unsigned char  actfunc, oactfunc;
    unsigned int   trigaddr, mask, active, trigactive;
    unsigned int   launched, bmaplaunch;
-   unsigned long  afuncmap, ofuncmap;
+   unsigned long  ofuncmap;
 
    int            j, k, found, index = -1;
    unsigned char  hcode, ucode, trig = 0;
@@ -606,7 +625,6 @@ char *translate_oregon( unsigned char *buf, unsigned char *sunchanged, int *laun
    unsigned char        fcast;
    char                 *fcast_txt;
    char                 minibuf[32];
-   unsigned char        extra;
    char                 rawstring[32];
    char                 flipstr[32];
    char                 *unitstring = "";
@@ -711,6 +729,7 @@ char *translate_oregon( unsigned char *buf, unsigned char *sunchanged, int *laun
       case OreWind1 :
       case OreWind2 :
       case OreWind3 :
+      case OreRfxWind :
          loc = aliasp[index].storage_index;
 
          if ( seq == 1 ) {
@@ -733,8 +752,12 @@ char *translate_oregon( unsigned char *buf, unsigned char *sunchanged, int *laun
 
             batchange = (batstatus ^ (unsigned char)prevdata[0]) & ORE_LOBAT;
 
-            /* Average speed in decimeters/sec */
-            davspeed = ((vdatap[8] & 0xf0) >> 4) * 100 + (vdatap[8] & 0x0f) * 10 + ((vdatap[7] & 0xf0) >> 4);
+	    if ( subtype == OreRfxWind ) {
+	      davspeed = vdatap[7] * 256 + vdatap[8];
+	    } else {
+	      /* Average speed in decimeters/sec */
+	      davspeed = ((vdatap[8] & 0xf0) >> 4) * 100 + (vdatap[8] & 0x0f) * 10 + ((vdatap[7] & 0xf0) >> 4);
+	    }
             longvdata |= (unsigned long)davspeed << ORE_DATASHFT;
 
             if ( configp->ore_display_count == YES )
@@ -769,8 +792,12 @@ char *translate_oregon( unsigned char *buf, unsigned char *sunchanged, int *laun
             longvdata |= status | ((unsigned long)blevel << ORE_BATSHFT);
 
             /* Process wind speeds as decimeters/sec */
-            dspeed = (vdatap[7] & 0x0f) * 100 +
-                     ((vdatap[6] & 0xf0) >> 4) * 10 + (vdatap[6] & 0x0f);
+	    if ( subtype == OreRfxWind ) {
+	      dspeed = vdatap[9] * 256 + vdatap[10];
+	    } else {
+	      dspeed = (vdatap[7] & 0x0f) * 100 +
+		((vdatap[6] & 0xf0) >> 4) * 10 + (vdatap[6] & 0x0f);
+	    }
 
             if ( configp->ore_display_count == YES )
                sprintf(rawstring, "[%u] ", dspeed);
@@ -808,7 +835,9 @@ char *translate_oregon( unsigned char *buf, unsigned char *sunchanged, int *laun
             longvdata |= status | ((unsigned long)blevel << ORE_BATSHFT);
 
 
-            if ( subtype == OreWind3 ) {
+	    if ( subtype == OreRfxWind ) {
+	      direction = vdatap[4] * 256 + vdatap[5];
+	    } else if ( subtype == OreWind3 ) {
                direction = ((vdatap[5] & 0xf0) >> 4) * 1000 +
                            (vdatap[5] & 0x0f) * 100 + ((vdatap[4] & 0xf0) >> 4) * 10;
             }
@@ -879,6 +908,7 @@ char *translate_oregon( unsigned char *buf, unsigned char *sunchanged, int *laun
       case OreRain1 :
       case OreRain2 :
       case OreRain3 :
+      case OreRfxRain :
          loc = aliasp[index].storage_index;
          func = aliasp[index].funclist[seq - 1];
          statusoffset = aliasp[index].statusoffset[seq - 1];
@@ -894,7 +924,6 @@ char *translate_oregon( unsigned char *buf, unsigned char *sunchanged, int *laun
          /*  [loc + 6] => Last changed total status, channel, and battery    */
          /*  [loc + 7] => Last changed Total 32-bit value                    */
 
-         extra = 0;
          *flipstr = '\0';
 
          if ( func == OreRainRateFunc ) {
@@ -930,6 +959,14 @@ char *translate_oregon( unsigned char *buf, unsigned char *sunchanged, int *laun
                        (vdatap[6] & 0x0f);
                tipfactor = 10;
                unitstring = (*configp->ore_rainrateunits) ? configp->ore_rainrateunits : "inches/hr";
+            }
+            else if ( subtype == OreRfxRain ) {
+	      drain = vdatap[4] * 256 + vdatap[5];
+	      if ( vdatap[10] == 0x02 ) {
+		multiplier = 10;
+	      }
+	      tipfactor = 1;  /* XXXX */
+	      unitstring = (*configp->ore_rainrateunits) ? configp->ore_rainrateunits : "mm/hr";
             }
             else  {
                drain = ((vdatap[5] & 0xf0) >> 4) * 1000 + (vdatap[5] & 0x0f) * 100 +
@@ -983,6 +1020,18 @@ char *translate_oregon( unsigned char *buf, unsigned char *sunchanged, int *laun
                minroll = 25u;
                multiplier = 1000;
                tipfactor = 1;
+            }
+            else if ( subtype == OreRfxRain ) {
+	      if ( vdatap[10] == 0x06 ) { /* Rain6 */
+		train = vdatap[9] * 266; 
+	      }
+	      else {
+		train = vdatap[7] * 65536 + vdatap[8] * 256 + vdatap[9]; 
+		multiplier = 100;
+	      }
+	      tipfactor = 1; /* XXXX */
+	      unitstring = (*configp->ore_raintotunits) ? configp->ore_raintotunits : "mm";
+	      minroll = 10u;
             }
             else  {
                train = (vdatap[9] & 0x0f) * 100000 +
@@ -1047,176 +1096,10 @@ char *translate_oregon( unsigned char *buf, unsigned char *sunchanged, int *laun
 
          break;
 
-#if 0
-      case OreRain1 :
-      case OreRain2 :
-      case OreRain3 :
-         loc = aliasp[index].storage_index;
-
-         /* Rain data storage. Note that here we are using one extra storage */
-         /* location each for the 32-bit rate and total rain. I.e.,          */
-         /*  [loc]     => Rate status, channel, and battery                  */
-         /*  [loc + 1] => Rate 32-bit value                                  */
-         /*  [loc + 2] => Total status, channel, and battery                 */
-         /*  [loc + 3] => Total 32-bit value                                 */
-         /*  [loc + 4] => Last changed Rate status, channel, and battery     */
-         /*  [loc + 5] => Last changed Rate 32-bit value                     */
-         /*  [loc + 6] => Last changed total status, channel, and battery    */
-         /*  [loc + 7] => Last changed Total 32-bit value                    */
-
-         extra = 0;
-         *flipstr = '\0';
-
-         if ( seq == 1 ) {
-            /* Rainfall Rate */
-            loc = aliasp[index].storage_index;
-            status = 0;
-//            /* Save interval since last transmission */
-//            intvstrfunc(intvstr, time(NULL), x10state[hcode].timestamp[ucode]);
-
-            longvdata = (unsigned long)(channel & 0x0fu) << ORE_CHANSHFT;
-
-            status = ORE_VALID | batstatus;
-            longvdata |= status | ((unsigned long)blevel << ORE_BATSHFT);
-
-            prevvalp = &x10global.data_storage[loc + 2 * (seq-1)];
-            lastchvalp = &x10global.data_storage[loc + 2 * (nvar + seq-1)];
-
-
-            /* Process rainfall rate */
-            drain = 0;
-            multiplier = 1;
-            if ( subtype == OreRain1 ) {
-               drain = ((vdatap[5] & 0xf0) >> 4) * 100 + (vdatap[5] & 0x0f) * 10 +
-                       ((vdatap[4] & 0xf0) >> 4) ;
-               multiplier = 1000;
-               tipfactor = 1;
-               unitstring = (*configp->ore_rainrateunits) ? configp->ore_rainrateunits : "mm/hr";
-//               sprintf(flipstr, "flipcnt %d ", (vdatap[6] & 0x0f));
-            }
-            else if ( subtype == OreRain2 ) {
-               drain = ((vdatap[5] & 0xf0) >> 4) * 1000 + (vdatap[5] & 0x0f) * 100 +
-                       ((vdatap[4] & 0xf0) >> 4) * 10 +
-                       (vdatap[6] & 0x0f);
-               tipfactor = 10;
-               unitstring = (*configp->ore_rainrateunits) ? configp->ore_rainrateunits : "inches/hr";
-            }
-            else  {
-               drain = ((vdatap[5] & 0xf0) >> 4) * 1000 + (vdatap[5] & 0x0f) * 100 +
-                       ((vdatap[4] & 0xf0) >> 4) * 10 + (vdatap[4] & 0x0f);
-               tipfactor = 10;
-               unitstring = (*configp->ore_rainrateunits) ? configp->ore_rainrateunits : "inches/hr";
-            }
-
-            if ( configp->ore_display_count == YES )
-               sprintf(rawstring, "[%lu] ", drain);
-
-            drain *= multiplier;
-
-            longvdata2 = drain;
-
-            lastdrain = *(lastchvalp + 1);
-
-            delta = abs(drain - lastdrain) / multiplier;
-            *sunchanged = ((delta/tipfactor) < configp->ore_chgbits_rrate) ? 1 : 0;
-
-            func = OreRainRateFunc;
-            trig = OreRainRateTrig;
-            vflags |= (status & ORE_LOBAT) ? SEC_LOBAT : 0;
-
-            create_flagslist (vtype, vflags, flagslist);
-
-            sprintf(outbuf, "func %12s : hu %c%-2d %sRate "FMT_ORERRATE"%s %s%s%s%s(%s)",  
-               funclabel[func], hc, unit, chstr, ((double)drain / 1000.0) * configp->ore_rainratescale, unitstring,
-               rawstring, flipstr, batstr, flagslist, aliasp[index].label);
-
-         }
-         else if ( seq == 2 ) {
-            /* Process Total Rain data */
-            longvdata = (unsigned long)(channel & 0x0fu) << ORE_CHANSHFT;
-
-            status = ORE_VALID | batstatus;
-
-            longvdata |= status | ((unsigned long)blevel << ORE_BATSHFT);
-
-            prevvalp = &x10global.data_storage[loc + 2 * (seq-1)];
-            lastchvalp = &x10global.data_storage[loc + 2 * (nvar + seq-1)];
-
-            if ( subtype == OreRain1 ) {
-               train = (vdatap[8] & 0x0f) * 1000 +
-                       ((vdatap[7] & 0xf0) >> 4) * 100 + (vdatap[7] & 0x0f) * 10 +
-                       ((vdatap[6] & 0xf0) >> 4);
-               unitstring = (*configp->ore_raintotunits) ? configp->ore_raintotunits : "mm";
-               minroll = 25u;
-               multiplier = 1000;
-               tipfactor = 1;
-//               sprintf(flipstr, "flipcnt %d ", (vdatap[6] & 0x0f));
-            }
-            else  {
-               train = (vdatap[9] & 0x0f) * 100000 +
-                       ((vdatap[8] & 0xf0) >> 4) * 10000 + (vdatap[8] & 0x0f) * 1000 +
-                       ((vdatap[7] & 0xf0) >> 4) * 100 + (vdatap[7] & 0x0f) * 10 +
-                       ((vdatap[6] & 0xf0) >> 4);
-               multiplier = 1;
-               tipfactor = 39;
-               unitstring = (*configp->ore_raintotunits) ? configp->ore_raintotunits : "inches";
-               minroll = 1000u;
-            }
-
-            if ( configp->ore_display_count == YES )
-               sprintf(rawstring, "[%lu] ", train);
-
-            train *= multiplier;
-
-            longvdata2 = train;
-
-            *sunchanged = 0;
-
-            /* Determine change and/or rollover here */
-
-            lastdrain = *(lastchvalp + 1);
-            delta = abs(train - lastdrain) / multiplier;
-            *sunchanged = ((delta/tipfactor) < configp->ore_chgbits_rtot) ? 1 : 0;
-
-            if ( *(prevvalp + 1) > minroll && train < *(prevvalp + 1) )
-               vflags |= RFX_ROLLOVER;
-
-            func = OreRainTotFunc;
-            trig = OreRainTotTrig;
-            vflags |= (status & ORE_LOBAT) ? SEC_LOBAT : 0;
-
-            create_flagslist (vtype, vflags, flagslist);
-
-            sprintf(outbuf, "func %12s : hu %c%-2d %sTotRain "FMT_ORERTOT"%s %s%s%s%s(%s)",  
-               funclabel[func], hc, unit, chstr, ((double)train / 1000.0) * configp->ore_raintotscale, unitstring,
-               rawstring, flipstr, batstr, flagslist, aliasp[index].label);
-
-         }
-         else {
-            longvdata2 = longvdata = 0;
-            break;
-         }
-
-         x10global.longvdata = longvdata;
-         x10global.longvdata2 = longvdata2;
-
-         *prevvalp = longvdata;
-         *(prevvalp + 1) = longvdata2;
-
-         if ( *sunchanged == 0 ) {
-            x10state[hcode].state[ChgState] |= bitmap;
-            *lastchvalp = longvdata;
-            *(lastchvalp + 1) = longvdata2;
-         }
-         else {
-            x10state[hcode].state[ChgState] &= ~bitmap;
-         }
-
-         break;
-#endif
 
       case OreUV1 :
       case OreUV2 :
+      case OreRfxUV :
          /* Process UV sensor data */
          vflags_mask = SEC_LOBAT;
          loc = aliasp[index].storage_index;
@@ -1234,6 +1117,9 @@ char *translate_oregon( unsigned char *buf, unsigned char *sunchanged, int *laun
 
          if ( subtype == OreUV1 ) {
             uvfactor = (vdatap[5] & 0x0f) * 10 + (vdatap[4] >> 4);
+         }
+         else if ( subtype == OreRfxUV ) {
+	    uvfactor = vdatap[4]; // XXXX this is UV*10
          }
          else {
             uvfactor = (vdatap[4] >> 4);
@@ -1286,6 +1172,8 @@ char *translate_oregon( unsigned char *buf, unsigned char *sunchanged, int *laun
       case OreTemp3 :
       case OreTHB1 :
       case OreTHB2 :
+      case OreRfxTemp :
+      case OreRfxTH :
          loc = aliasp[index].storage_index;
          if ( seq == 1 ) {
 
@@ -1298,42 +1186,34 @@ char *translate_oregon( unsigned char *buf, unsigned char *sunchanged, int *laun
             longvdata = (unsigned long)(channel & 0x0fu) << ORE_CHANSHFT;
 
             /* Temperature in units of 0.1 C */
-            dtempc = 100 * ((vdatap[5] & 0xf0u) >> 4) +
+	    if ( subtype == OreRfxTemp || subtype == OreRfxTH ) {
+	      dtempc= (vdatap[4] & 0x7f) * 256 + vdatap[5];
+	    }
+	    else {
+	      dtempc = 100 * ((vdatap[5] & 0xf0u) >> 4) +
                             10 * (vdatap[5] & 0x0fu) +
                                 ((vdatap[4] & 0xf0u) >> 4);
-            if ( subtype == OreTemp2 )
-               dtempc += 1000 * (vdatap[6] & 0x01);
+	      if ( subtype == OreTemp2 )
+		dtempc += 1000 * (vdatap[6] & 0x01);
+	    }
 
             longvdata |= (unsigned long)dtempc << ORE_DATASHFT;
             status = ORE_VALID;
 
-            if ( vdatap[6] & 0x08u ) {
-               dtempc = -dtempc;
-               status |= ORE_NEGTEMP;
-            }
+	    if ( subtype == OreRfxTemp || subtype == OreRfxTH ) {
+	      if ( vdatap[4] & 0x80u ) {
+		dtempc = -dtempc;
+		status |= ORE_NEGTEMP;
+	      }
+	    }
+	    else {
+	      if ( vdatap[6] & 0x08u ) {
+		dtempc = -dtempc;
+		status |= ORE_NEGTEMP;
+	      }
+	    }
 
-            *batstr = '\0';
-            blevel = 0;
-
-            switch ( orechk[subindx].batmode ) {
-               case 2 :
-                  blevel = 10 - (vdatap[4] & 0x0fu);
-                  status |= ORE_BATLVL;
-                  if ( (10 * blevel) <= configp->ore_lobat ) {
-                     status |= ORE_LOBAT;
-                  }
-                  if ( configp->ore_display_batlvl == YES )
-                     sprintf(batstr, "BatLvl %d%% ", blevel * 10);
-
-                  break;
-               case 1 :
-                  if ( vdatap[4] & 0x04u ) {
-                     status |= ORE_LOBAT;
-                  }
-                  break;
-               default :
-                  break;
-            }
+	    status |= batstatus;
                      
             longvdata |= status | (blevel << ORE_BATSHFT);
 
@@ -1368,7 +1248,11 @@ char *translate_oregon( unsigned char *buf, unsigned char *sunchanged, int *laun
             vflags_mask = SEC_LOBAT | ORE_RHMIN | ORE_RHMAX;
             longvdata = (unsigned long)(channel & 0x0fu) << ORE_CHANSHFT;
             /* RH in units of 1% */
-            humid = 10 * (vdatap[7] & 0x0fu) + ((vdatap[6] & 0xf0u) >> 4);
+	    if ( subtype == OreRfxTH ) {
+	      humid = vdatap[7];
+	    } else {
+	      humid = 10 * (vdatap[7] & 0x0fu) + ((vdatap[6] & 0xf0u) >> 4);
+	    }
             longvdata |= (unsigned long)humid << ORE_DATASHFT;
             status |= ORE_VALID;
 
@@ -1968,7 +1852,6 @@ char *translate_oregon( unsigned char *buf, unsigned char *sunchanged, int *laun
    }
 
    actfunc = 0;
-   afuncmap = 0;
    oactfunc = func;
    ofuncmap = (1 << trig);
    trigaddr = bitmap;
@@ -2089,14 +1972,14 @@ char *translate_ore_emu( unsigned char *buf, unsigned char *sunchanged, int *lau
    unsigned char  actfunc, oactfunc;
    unsigned int   trigaddr, mask, active, trigactive;
    unsigned int   bmaplaunch;
-   unsigned long  afuncmap, ofuncmap;
+   unsigned long  ofuncmap;
 
    int            j, /*k,*/ found, index = -1;
    unsigned char  hcode, ucode, trig = 0;
    unsigned int   bitmap, changestate, startupstate;
    unsigned long  vflags = 0, vflags_mask = 0;
 
-   unsigned long prevdata, lastchdata;
+   unsigned long lastchdata;
 
    double temp, dbaro;
 
@@ -2174,7 +2057,6 @@ char *translate_ore_emu( unsigned char *buf, unsigned char *sunchanged, int *lau
       
    loc = aliasp[index].storage_index;
 
-   prevdata = x10global.data_storage[loc + seq - 1];
    lastchdata = x10global.data_storage[loc + nvar + seq - 1];
 
    switch ( seq ) {
@@ -2291,7 +2173,6 @@ char *translate_ore_emu( unsigned char *buf, unsigned char *sunchanged, int *lau
    }
 
    actfunc = 0;
-   afuncmap = 0;
    oactfunc = func;
    ofuncmap = (1 << trig);
    trigaddr = bitmap;
@@ -2390,7 +2271,7 @@ int show_oregon ( void )
    char           hc;
    int            j, unit, index, count = 0, maxlabel = 0, maxmod = 0;
    int            loc, nvar, statusoffset;
-   unsigned char  hcode, ucode, func;
+   unsigned char  ucode, func;
    unsigned char  subtype, subindx, status = 0;
    unsigned long  longvdata = 0;
    unsigned long  drain;
@@ -2431,7 +2312,6 @@ int show_oregon ( void )
       ucode = single_bmap_unit(aliasp[index].unitbmap);
       unit = code2unit(ucode);
       hc = aliasp[index].housecode;
-      hcode = hc2code(hc);
       subtype = aliasp[index].subtype;
       loc = aliasp[index].storage_index;
       nvar = aliasp[index].nvar;
@@ -2551,7 +2431,7 @@ int show_oregon ( void )
             case OreRainRateFunc :
                longvdata = x10global.data_storage[loc + (2 * j)];
                status = longvdata & 0xff;
-               if ( subtype == OreRain1 ) {
+               if ( subtype == OreRain1 || subtype == OreRfxRain ) {
                   unitstring = (*configp->ore_rainrateunits) ? configp->ore_rainrateunits : "mm/hr";
                }
                else {
@@ -2569,9 +2449,9 @@ int show_oregon ( void )
 
                break;
             case OreRainTotFunc :
-               longvdata = x10global.data_storage[loc + (2 * j)];
+               longvdata = x10global.data_storage[loc + statusoffset ];
                status = longvdata & 0xff;
-               if ( subtype == OreRain1 ) {
+               if ( subtype == OreRain1 || subtype == OreRfxRain ) {
                   unitstring = (*configp->ore_raintotunits) ? configp->ore_raintotunits : "mm";
                }
                else {
@@ -2583,7 +2463,7 @@ int show_oregon ( void )
                   break;
                }
                else {
-                 drain = x10global.data_storage[loc + (2 * j) + 1];
+                 drain = x10global.data_storage[loc + statusoffset + 1];
                  printf("Total "FMT_ORERTOT"%s ", ((double)drain / 1000.0) * configp->ore_raintotscale, unitstring);
                }
 
@@ -2645,7 +2525,7 @@ int c_orecmds ( int argc, char *argv[] )
 {
 
    ALIAS          *aliasp;
-   unsigned char  hcode, ucode, func;
+   unsigned char  ucode, func;
    unsigned long  aflags;
    unsigned long  longvdata, rain;
    char           hc;
@@ -2715,7 +2595,6 @@ int c_orecmds ( int argc, char *argv[] )
       fprintf(stderr, "Only a single unit address is valid.\n");
       return 1;
    }
-   hcode = hc2code(hc);
    ucode = single_bmap_unit(bitmap);
    unit  = code2unit(ucode);
 
@@ -2838,7 +2717,6 @@ int send_ore_emu ( unsigned char vtype, unsigned char subindex, int seq,
    char writefilename[PATH_LEN + 1];
    unsigned char outbuf[128];
    int  j;
-   int  ignoret;
 
    static unsigned char template[18] = {
     0xff,0xff,0xff,3,ST_COMMAND,ST_SOURCE,0,
@@ -2859,7 +2737,7 @@ int send_ore_emu ( unsigned char vtype, unsigned char subindex, int seq,
       outbuf[(sizeof(template) + j)] = (lvalue >> (8 * j)) & 0xff;
    }
 
-   ignoret = write(sptty, (char *)outbuf, (sizeof(template)) + 4);
+   (void) write(sptty, (char *)outbuf, (sizeof(template)) + 4);
 
    return 0;
 }

@@ -1750,15 +1750,25 @@ Specify the auxiliary serial port or network address and RF receiver device.
 
   TTY_AUX  <serial_port or network_address:port>  <receiver device>
 .br
-where <receiver device> is W800RF32A, MR26A, or RFXCOM.  Examples:
+where <receiver device> is W800RF32A, MR26A, RFXCOM or RFXTRX.  Examples:
 .br
   TTY_AUX  /dev/ttyS1  W800RF32A
 .br
   TTY_AUX  10.10.10.10:10000  RFXCOM
 .br
+  TTY_AUX  /dev/ttyUSB0  RFXTRX  (*)
+.br
+
+(*) RFXTRX requires to also have 'RFXCOM_HIBAUD YES' to force 38400 baud
+.br
 
 There is no default for this directive.
 
+.SH RFX_MODE_BYTES directive
+Due to the large amount of possible protocols supported by the RFXTRX, adding an
+option to enable (or selectively disable) support for particular protocol
+is not very practical. You either program the device once using RFXmanager
+or specify all the modes in this directive, see README.RFXTRX for usage.
 .SH SUPPRESS_RFXJAM directive
 Older firmware versions of the RFXCOM receiver sent a special "jamming"
 signal when they detected RF jamming, but the system was prone to many

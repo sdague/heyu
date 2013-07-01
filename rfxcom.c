@@ -1711,7 +1711,7 @@ char *translate_rfxmeter ( unsigned char *buf, unsigned char *sunchanged, int *l
       rfxcode = vdatap[3] >> 4;
 
       if ( rfxcode == 0 ) {
-         counter = x10global.longvdata >> 8;
+	 counter = (x10global.longvdata >> 8) & 0xffffff;
          if ( func == RFXPowerFunc && *(configp->rfx_powerunits) ) {
             rfxmeterdbl = (double)counter * configp->rfx_powerscale;
             sprintf(outbuf, "func %12s : hu %c%-2d Meter "FMT_RFXPOWER" %s %s(%s)",
@@ -1832,7 +1832,7 @@ char *translate_kaku ( unsigned char *xbuf, unsigned char *sunchanged, int *laun
    unsigned char keynum;
    char          hc = 'Z';
    unsigned char hcode, ucode, trig;
-   unsigned int  bitmap, afuncmap;
+   unsigned int  bitmap;
    unsigned long kfuncmap;
    unsigned int  onstate, dimstate, active, mask, resumask, trigaddr, trigactive;
    unsigned int  changestate, startupstate;
@@ -1843,15 +1843,16 @@ char *translate_kaku ( unsigned char *xbuf, unsigned char *sunchanged, int *laun
    unsigned char level = 0, breaker;
    int           j, k, n, nx10, unit;
    int           index;
-   int           nbits, func, actfunc, kactfunc;
+   int           nbits, func, kactfunc;
    char          funcparmstr[16];
-   char          *sublabel;
 
    /* Kaku functions 0x00 to 0x11 */
    static int    ksfunc[] = {KakuOffFunc, KakuOnFunc, KakuGrpOffFunc, KakuGrpOnFunc};
 //   static int    kstrig[] = {KakuOffTrig, KakuOnTrig, KakuGrpOffTrig, KakuGrpOnTrig};
    static int    kpfunc[] = {KakuPreFunc, KakuUnkPreFunc, KakuGrpPreFunc, KakuUnkPreFunc};
 //   static int    kptrig[] = {KakuPreTrig, KakuUnkPreTrig, KakuGrpPreTrig, KakuUnkPreTrig};
+   /* Kaku funtions 0..5 reported from RFXTRX */
+   static int    krfunc[] = {KakuOffFunc, KakuOnFunc, KakuPreFunc, KakuGrpOffFunc, KakuGrpOnFunc, KakuGrpPreFunc};
 
    *sunchanged = 0;
    *launchp = -1;
@@ -1862,14 +1863,17 @@ char *translate_kaku ( unsigned char *xbuf, unsigned char *sunchanged, int *laun
 
    nbits = xbuf[4] & 0x7F;
    buf = xbuf + 5;
-   sublabel = (nbits == 34) ? "KAKU_S" :
-              (nbits == 36) ? "KAKU_D" : "KAKU_?";
 
-   kaddr = (buf[0] << 24) | (buf[1] << 16) | (buf[2] << 8) | (buf[3] & 0xc0);
-   kaddr = kaddr >> 6;
-
-   cmd = (buf[3] & 0x30) >> 4;
-   keynum = (buf[3] & 0x0f);
+   if (nbits == 56) { /* RFXTRX nicely reports in separate bytes */
+     kaddr  = (buf[0] << 24) | (buf[1] << 16) | (buf[2] << 8) | (buf[3]);
+     cmd    = buf[5];
+     keynum = buf[4] - 1;
+   } else {
+     kaddr  = (buf[0] << 24) | (buf[1] << 16) | (buf[2] << 8) | (buf[3] & 0xc0);
+     kaddr  = (kaddr >> 6) & 0x3ffffff;
+     cmd    = (buf[3] & 0x30) >> 4;
+     keynum = (buf[3] & 0x0f);
+   }
 
    index = 0;
    *outbuf = '\0';
@@ -1879,7 +1883,7 @@ char *translate_kaku ( unsigned char *xbuf, unsigned char *sunchanged, int *laun
    /* Create a list of Hu mapped to this signal */
 
    nx10 = 0;
-   if ( cmd & 0x02 ) {
+   if ( cmd >= 0x02 ) {
       /* Group command */
       while ( aliasp && aliasp[index].line_no > 0 ) {
          if ( aliasp[index].vtype == RF_KAKU ) {
@@ -1913,7 +1917,7 @@ char *translate_kaku ( unsigned char *xbuf, unsigned char *sunchanged, int *laun
 
    if ( !nx10 ) {
       /* Display "Key" for kOn/kOff or "Grp" for kGrpOn/kGrpOff */
-      if ( cmd & 0x02 ) {
+      if ( cmd >= 0x02 ) {
          /* Group command */
          ulabel = "Grp";
          sprintf(uval, "%c", 'A' + keynum);
@@ -1937,6 +1941,13 @@ char *translate_kaku ( unsigned char *xbuf, unsigned char *sunchanged, int *laun
          sprintf(outbuf, "%s rcva func %12s : Type KAKU_P ID 0x%07lx Cmd %s %s %s Level %d [Cmd2 0x%02x]\n",
            datstrf(), "RFdata", kaddr, funclabel[func], ulabel, uval, level, cmd2);
       }
+      else if ( nbits == 56 ) {
+	 level = buf[6];
+	 cmd2 = 0;
+         func = krfunc[cmd];
+         sprintf(outbuf, "%s rcva func %12s : Type KAKU_P ID 0x%07lx Cmd %s %s %s Level %d [Cmd2 0x%02x]\n",
+           datstrf(), "RFdata", kaddr, funclabel[func], ulabel, uval, level, cmd2);
+      }
       else {
          sprintf(outbuf, "%s rcva Unknown KAKU\n", datstrf());
       }
@@ -1946,7 +1957,15 @@ char *translate_kaku ( unsigned char *xbuf, unsigned char *sunchanged, int *laun
    /* Built a combined HU bitmap for each housecode */
    compress_x10list(x10list, &nx10);
 
-   actfunc  = func = (nbits == 34) ? ksfunc[cmd] : kpfunc[cmd];
+   if ( nbits == 56 ) {
+     func = krfunc[cmd];
+   } 
+   else if ( nbits == 34 ) {
+     func = ksfunc[cmd];
+   } 
+   else {
+     func = kpfunc[cmd];
+   }
 
    for ( n = 0; n < nx10; n++ ) {
       hcode = x10list[n].hcode;
@@ -2089,8 +2108,6 @@ char *translate_kaku ( unsigned char *xbuf, unsigned char *sunchanged, int *laun
       x10global.lasthc = hcode;
       x10global.lastaddr = 0;
       
-      actfunc = 0;
-      afuncmap = 0;
       kactfunc = func;
       kfuncmap = (1 << trig);
       trigaddr = active;

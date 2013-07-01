@@ -210,7 +210,7 @@ opt_bmb_sd18(),
 opt_secignore(), opt_visonic(),
 opt_oreWind1(), opt_oreWind2(), opt_oreWind3(),
 opt_oreRain1(), opt_oreRain2(), opt_oreRain3(),
-opt_oreUV1(), opt_oreUV2(), opt_kaku(), opt_owlElec2(), opt_owlElec2new(), opt_owlElec2rev();
+  opt_oreUV1(), opt_oreUV2(), opt_kaku(), opt_owlElec2(), opt_owlElec2new(), opt_owlElec2rev(), opt_oreRfxTemp(), opt_oreRfxTH(), opt_oreRfxWind(), opt_oreRfxRain(), opt_oreRfxUV();
 
 /* Decoder functions for modules */
 int fn_ds10a(), fn_ds90(), fn_ms10a(), fn_sh624(), fn_kr10a(), fn_ur81a(),
@@ -382,6 +382,7 @@ struct modules_st {
   {"ORE_TH5",     MXLV, VORE,  VIRTUAL,   0, opt_oreTH5, NULL},
   {"ORE_TH6",     MXLV, VORE,  VIRTUAL,   0, opt_oreTH6, NULL},
   {"THGR918N",    MXLV, VORE,  VIRTUAL,   0, opt_oreTH6, NULL},
+  {"ORE_RFXTH",   MXLV, VORE,  VIRTUAL,   0, opt_oreRfxTH, NULL},
   {"ORE_T1",      MXLV, VORE,  VIRTUAL,   0, opt_oreTemp1, NULL},
   {"THR138",      MXLV, VORE,  VIRTUAL,   0, opt_oreTemp1, NULL},
   {"ORE_T2",      MXLV, VORE,  VIRTUAL,   0, opt_oreTemp2, NULL},
@@ -389,6 +390,7 @@ struct modules_st {
   {"THN122N",     MXLV, VORE,  VIRTUAL,   0, opt_oreTemp2, NULL},
   {"THN132N",     MXLV, VORE,  VIRTUAL,   0, opt_oreTemp2, NULL},
   {"ORE_T3",      MXLV, VORE,  VIRTUAL,   0, opt_oreTemp3, NULL},
+  {"ORE_RFXTEMP", MXLV, VORE,  VIRTUAL,   0, opt_oreRfxTemp, NULL},
   {"ORE_THB1",    MXLV, VORE,  VIRTUAL,   0, opt_oreTHB1, NULL},
   {"BTHR918",     MXLV, VORE,  VIRTUAL,   0, opt_oreTHB1, NULL},
   {"ORE_THB2",    MXLV, VORE,  VIRTUAL,   0, opt_oreTHB2, NULL},
@@ -404,10 +406,12 @@ struct modules_st {
   {"ORE_WIND2",   MXLV, VORE,  VIRTUAL,   0, opt_oreWind2, NULL},
   {"WGR800",      MXLV, VORE,  VIRTUAL,   0, opt_oreWind2, NULL},
   {"ORE_WIND3",   MXLV, VORE,  VIRTUAL,   0, opt_oreWind3, NULL},
+  {"ORE_RFXWIND", MXLV, VORE,  VIRTUAL,   0, opt_oreRfxWind, NULL},
   {"WGR918N",     MXLV, VORE,  VIRTUAL,   0, opt_oreWind3, NULL},
   {"ORE_RAIN1",   MXLV, VORE,  VIRTUAL,   0, opt_oreRain1, NULL},
   {"PCR918N",     MXLV, VORE,  VIRTUAL,   0, opt_oreRain1, NULL},
   {"ORE_RAIN2",   MXLV, VORE,  VIRTUAL,   0, opt_oreRain2, NULL},
+  {"ORE_RFXRAIN",   MXLV, VORE,  VIRTUAL,   0, opt_oreRfxRain, NULL},
   {"PCR800",      MXLV, VORE,  VIRTUAL,   0, opt_oreRain2, NULL},
   {"ORE_RAIN3",   MXLV, VORE,  VIRTUAL,   0, opt_oreRain3, NULL},
   {"ELS_CM113",   MXLV, VORE,  VIRTUAL,   0, opt_elsElec1, NULL},
@@ -415,6 +419,7 @@ struct modules_st {
   {"ORE_ELS",     MXLV, VORE,  VIRTUAL,   0, opt_elsElec1, NULL},
   {"ORE_UV1",     MXLV, VORE,  VIRTUAL,   0, opt_oreUV1, NULL},
   {"ORE_UV2",     MXLV, VORE,  VIRTUAL,   0, opt_oreUV2, NULL},
+  {"ORE_RFXUV",   MXLV, VORE,  VIRTUAL,   0, opt_oreRfxUV, NULL},
   {"OWL_ELEC2",   MXLV, VORE,  VIRTUAL,   0, opt_owlElec2new, NULL},
 #endif /* HASORE */
 
@@ -1739,6 +1744,22 @@ int opt_oreTemp1 ( ALIAS *aliasp, int aliasindex, char **tokens, int *ntokens )
 
    return 0;
 }
+
+/*---------------------------------------------------------------------+
+ | Options for Oregon Temp sensors, reported via RFXTRX                |
+ +---------------------------------------------------------------------*/
+int opt_oreRfxTemp ( ALIAS *aliasp, int aliasindex, char **tokens, int *ntokens )
+{
+   if ( opt_oregon(aliasp, aliasindex, tokens, ntokens) != 0 )
+      return 1;
+
+   aliasp[aliasindex].subtype = OreRfxTemp;
+   aliasp[aliasindex].nvar = 1;
+   aliasp[aliasindex].storage_units = 2 * aliasp[aliasindex].nvar;
+   aliasp[aliasindex].funclist[0] = OreTempFunc;
+
+   return 0;
+}
    
 /*---------------------------------------------------------------------+
  | Options for Oregon Temp2 sensors                                    |
@@ -1875,6 +1896,23 @@ int opt_oreTH6 ( ALIAS *aliasp, int aliasindex, char **tokens, int *ntokens )
 }
    
 /*---------------------------------------------------------------------+
+ | Options for Oregon TempHygro sensors via RFXTRX                     |
+ +---------------------------------------------------------------------*/
+int opt_oreRfxTH ( ALIAS *aliasp, int aliasindex, char **tokens, int *ntokens )
+{
+   if ( opt_oregon(aliasp, aliasindex, tokens, ntokens) != 0 )
+      return 1;
+
+   aliasp[aliasindex].subtype = OreRfxTH;
+   aliasp[aliasindex].nvar = 2;
+   aliasp[aliasindex].storage_units = 2 * aliasp[aliasindex].nvar;
+   aliasp[aliasindex].funclist[0] = OreTempFunc;
+   aliasp[aliasindex].funclist[1] = OreHumidFunc;
+
+   return 0;
+}
+   
+/*---------------------------------------------------------------------+
  | Options for Oregon THB1 sensors                                     |
  +---------------------------------------------------------------------*/
 int opt_oreTHB1 ( ALIAS *aliasp, int aliasindex, char **tokens, int *ntokens )
@@ -1965,6 +2003,24 @@ int opt_oreWind3 ( ALIAS *aliasp, int aliasindex, char **tokens, int *ntokens )
 }
 
 /*---------------------------------------------------------------------+
+ | Options for Oregon Wind sensors via RFXTRX                          |
+ +---------------------------------------------------------------------*/
+int opt_oreRfxWind ( ALIAS *aliasp, int aliasindex, char **tokens, int *ntokens )
+{
+   if ( opt_oregon(aliasp, aliasindex, tokens, ntokens) != 0 )
+      return 1;
+
+   aliasp[aliasindex].subtype = OreRfxWind;
+   aliasp[aliasindex].nvar = 3;
+   aliasp[aliasindex].storage_units = 2 * aliasp[aliasindex].nvar;
+   aliasp[aliasindex].funclist[0] = OreWindAvSpFunc;
+   aliasp[aliasindex].funclist[1] = OreWindSpFunc;
+   aliasp[aliasindex].funclist[2] = OreWindDirFunc;
+
+   return 0;
+}
+
+/*---------------------------------------------------------------------+
  | Options for Oregon Rain1 sensors                                    |
  +---------------------------------------------------------------------*/
 int opt_oreRain1 ( ALIAS *aliasp, int aliasindex, char **tokens, int *ntokens )
@@ -1994,6 +2050,26 @@ int opt_oreRain2 ( ALIAS *aliasp, int aliasindex, char **tokens, int *ntokens )
       return 1;
 
    aliasp[aliasindex].subtype = OreRain2;
+   aliasp[aliasindex].nvar = 2;
+   /* Need extra storage locations for 32 bit data */
+   aliasp[aliasindex].storage_units = 4 * aliasp[aliasindex].nvar;
+   aliasp[aliasindex].funclist[0] = OreRainRateFunc;
+   aliasp[aliasindex].funclist[1] = OreRainTotFunc;
+   /* Override the default storage offsets */
+   aliasp[aliasindex].statusoffset[0] = 0;
+   aliasp[aliasindex].statusoffset[1] = 4;
+
+   return 0;
+}
+/*---------------------------------------------------------------------+
+ | Options for Oregon Rain via RFXTRX                                  |
+ +---------------------------------------------------------------------*/
+int opt_oreRfxRain ( ALIAS *aliasp, int aliasindex, char **tokens, int *ntokens )
+{
+   if ( opt_oregon(aliasp, aliasindex, tokens, ntokens) != 0 )
+      return 1;
+
+   aliasp[aliasindex].subtype = OreRfxRain;
    aliasp[aliasindex].nvar = 2;
    /* Need extra storage locations for 32 bit data */
    aliasp[aliasindex].storage_units = 4 * aliasp[aliasindex].nvar;
@@ -2150,6 +2226,22 @@ int opt_oreUV2 ( ALIAS *aliasp, int aliasindex, char **tokens, int *ntokens )
       return 1;
 
    aliasp[aliasindex].subtype = OreUV2;
+   aliasp[aliasindex].nvar = 1;
+   aliasp[aliasindex].storage_units = 2 * aliasp[aliasindex].nvar;
+   aliasp[aliasindex].funclist[0] = OreUVFunc;
+
+   return 0;
+}
+
+/*---------------------------------------------------------------------+
+ | Options for Oregon UV sensors via RFXTRX                            |
+ +---------------------------------------------------------------------*/
+int opt_oreRfxUV ( ALIAS *aliasp, int aliasindex, char **tokens, int *ntokens )
+{
+   if ( opt_oregon(aliasp, aliasindex, tokens, ntokens) != 0 )
+      return 1;
+
+   aliasp[aliasindex].subtype = OreRfxUV;
    aliasp[aliasindex].nvar = 1;
    aliasp[aliasindex].storage_units = 2 * aliasp[aliasindex].nvar;
    aliasp[aliasindex].funclist[0] = OreUVFunc;

@@ -264,6 +264,7 @@ enum {SndC, SndM, SndP, SndS, SndT, RcvI, RcvT, SndA, RcvA, Xmtf};
 #define DEV_MR26A         8
 #define DEV_RFXCOM32     16
 #define DEV_RFXCOMVL     32
+#define DEV_RFXTRX       64
 #define DEV_DUMMY       256
 
 /* TTY */
@@ -307,11 +308,13 @@ enum {SndC, SndM, SndP, SndS, SndT, RcvI, RcvT, SndA, RcvA, Xmtf};
 #define RF_NOISEW800   0x7d    /* Noise from W800RF32A */
 #define RF_NOISEMR26   0x7e    /* Noise from MR26A */
 #define RF_NOISEVL     0x7f    /* Variable length noise */
+#define RF_RFXTRXLVL   0x80    /* RFXTRX RX level */
 
 /* RF Raw display modes */
 #define DISPMODE_RF_NONE     0
 #define DISPMODE_RF_NORMAL   1
 #define DISPMODE_RF_NOISE    2
+#define DISPMODE_RF_RXLVL    4
 
 /* Treatment of RF codes */
 #define RF_IGNORE     0
@@ -458,6 +461,7 @@ enum {ArmLogicStrict, ArmLogicMedium, ArmLogicLoose};
 #define DEF_STATE_CTRL            SC_SINGLE
 #define DEF_RF_FUNCMASK           0x7f
 #define DEF_DISP_RF_NOISE         NO
+#define DEF_DISP_RF_RXLVL         NO
 #define DEF_AUX_MINCOUNT_W800     1
 #define DEF_AUX_MINCOUNT_MR26     2
 #define DEF_AUX_MINCOUNT_RFXCOM   1
@@ -1299,6 +1303,7 @@ typedef struct {
   unsigned char hide_unchanged_inactive; /*  Override above "Hide" for Inactive reports */
   unsigned char show_change;      /* (Debug) append CHG|NOCHG to monitor display */
   unsigned char disp_rf_noise;    /* Display Aux RF Noise reception */
+  unsigned char disp_rf_rxlvl;    /* Display Aux RF Receive Level */
   long          arm_max_delay;    /* Delay time for Armed Max */
   unsigned char disp_raw_rf;      /* Display raw RF characters received by Aux */
   int           arm_logic;        /* Logic function (1-3) to use for arming */
@@ -1400,6 +1405,7 @@ typedef struct {
   char          launchpath_prefix[PATH_LEN + 1]; /* Prefix this to normal search PATH */
   unsigned char fix_stopstart_error; /* Workaround for Stop time = Start time internal error */
   int           chksum_timeout;    /* Wait for checksum timeout */
+  int           rfx_modebytes[4];  /* Rx freq, mode msg3/4/5 bytes */
   
 } CONFIG;
 

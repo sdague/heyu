@@ -93,9 +93,19 @@ extern unsigned int rflastaddr[16];
 extern unsigned int rftransceive[16][7];
 extern unsigned int rfforward[16][7];
 
+int display_aux_message ( char *);
 
 static unsigned char rf2hcode[16] = {
    0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15
+};
+static unsigned char trx2hucode[16] = {
+   6, 14, 2, 10, 1, 9, 5, 13, 7, 15, 3, 11, 0, 8, 4, 12
+};
+
+/* Map rfxtrx security codes to old x10 style */
+static unsigned char trx2secu[20] = {
+  0x84, 0x80, 0x04, 0x00, 0x0c, 0x8c, 0x22, 0x82, 0xff, 0x06, 
+  0x02, 0x0e, 0x0a, 0x86, 0xff, 0xff, 0xc6, 0x46, 0xc6, 0x46,
 };
 
 #if 0
@@ -125,6 +135,10 @@ static unsigned int rf_unit_code[16] = {
 static unsigned int rf_func_code[] = {
    0x0080, 0x0090, 0x0000, 0x0020,
    0x0098, 0x0088, 0x00a0,
+};
+/* rfxtrx has 0=off,on,dim,bright,,5=alloff,allon(,7=chime) */
+static unsigned int rf_trx2heyu[] = {
+  3, 2, 4, 5, 0, 0, 1, 3,
 };
 
 
@@ -173,13 +187,11 @@ int rfxcom_version ( unsigned short code, unsigned char *master, unsigned char *
    unsigned char outbuf[4];
    int nread;
 
-   int ignoret;
-
    outbuf[0] = (code >> 8) & 0xffu;
    outbuf[1] = code & 0xffu;
 
    *master = *slave = 0;
-   ignoret = write(tty_aux, (char *)outbuf, 2);
+   (void)  write(tty_aux, (char *)outbuf, 2);
    nread = sxread(tty_aux, inbuf, 4, 1);
    if ( nread == 2 ) {
       if ( inbuf[0] == 'M' )
@@ -216,6 +228,115 @@ int rfxcom_version ( unsigned short code, unsigned char *master, unsigned char *
 }
 
 /*-------------------------------------------------------------+
+ | Decode message from  RFXTRX                                 |
+ +----DDDDD---------------------------------------------------------*/
+void rfxtrx_decode ( unsigned char *buf, unsigned int count )
+{
+  char	message[80];
+
+  switch (buf[0]) {
+  case 1:
+    if ( buf[1] == 0 ) {  // get mode result
+      sprintf(message, "RFXTRX hardware: 0x%02x, firmware version: %d", buf[4], buf[5]);
+      display_aux_message(message);
+      sprintf(message, "RFXTRX enabled protocols: 0x%02x 0x%02x 0x%02x", buf[6], buf[7], buf[8]);
+    } else {
+      sprintf(message, "RFXTRX Wrong command <0x%02x> received from application.",buf[3]);
+    }
+    display_aux_message(message);
+    break;
+  case 2: // transmit result
+    break;
+  default: // not decoded
+    sprintf(message, "aux-msg RFXTRX, type=0x%02x subtype=0x%02x length=%d, not yet decoded.\n", buf[0], buf[1], count );
+    display_aux_message(message);
+  }    
+}
+
+/*-------------------------------------------------------------+
+ | Get the firmware version of RFXTRX                          |
+ +----RRRRR---------------------------------------------------------*/
+int rfxtrx_version ( unsigned char *firmvers, unsigned char *hwtype )
+{
+   unsigned char inbuf[16];
+   unsigned char outbuf[16];
+   int nread;
+   int nwrite;
+
+   /* Reset 0D 00 00 05 00 00 00 00 00 00 00 00 00 00 */
+   memset(&outbuf, 0, 14);
+   outbuf[0] = 0x0d;
+   outbuf[3] = 0x05;
+
+   *firmvers = 0;
+   nwrite = write(tty_aux, (char *)outbuf, 14);
+   if ( nwrite != 14 ) {
+     syslog(LOG_ERR, "sending reset seq failed\n");
+   }
+   else {
+     syslog(LOG_ERR, "sent reset seq\n");
+   }
+   usleep(500000); /* 500ms wait */
+
+   /* Get Status:0D 00 00 01 02 00 00 00 00 00 00 00 00 00 */
+   memset(&outbuf, 0, 14);
+   outbuf[0] = 0x0d;
+   outbuf[3] = 0x01;
+   outbuf[4] = 0x02;
+
+   nwrite = write(tty_aux, (char *)outbuf, 14);
+   if ( nwrite != 14 ) {
+     syslog(LOG_ERR, "sending get_status seq failed\n");
+   }
+   usleep(50000); /* 50ms wait */
+
+   /* Empty the serial port buffers */
+   nread = 0;
+   while ( sxread(tty_aux, inbuf, 1, 1) > 0 && inbuf[0] == 0x0 && nread < 4096) {
+     nread++;
+   }
+   syslog(LOG_ERR, "emptied %d chars\n", nread);
+
+   usleep(50000); /* 50ms wait (otherwise we need loop here to get 14 chars)*/
+   if ( inbuf[0] == 13 ) {
+     nread = sxread(tty_aux, inbuf+1, 13, 1);
+     //     syslog(LOG_ERR, "read13 returned %d chars, inbuf[1]=0x%02x\n", nread,inbuf[1]);
+     nread++;
+   } 
+   else {
+     nread = sxread(tty_aux, inbuf, 14, 1);
+     syslog(LOG_ERR, "read14 returned %d chars, inbuf[1]=0x%02x\n", nread,inbuf[1]);
+   }
+   if ( nread == 14 ) {
+     *firmvers = inbuf[6];
+     *hwtype = inbuf[5];
+     /* La Crosse + Oregon + X10 + AC */
+     /* Set Mode:0D 00 00 00 03 53 00 msg3=00 08 25 00 00 00 00 */
+     /* set mode if defined in config files, otherwise don't touch */
+     if (config.rfx_modebytes[0] > 0) {
+       memset(&outbuf, 0, 14);
+       outbuf[0] = 0x0d;
+       outbuf[4] = 0x03;
+       outbuf[5] = config.rfx_modebytes[0];
+       outbuf[7] = config.rfx_modebytes[1];
+       outbuf[8] = config.rfx_modebytes[2];
+       outbuf[9] = config.rfx_modebytes[3];
+
+       nwrite = write(tty_aux, (char *)outbuf, 14);
+       if ( nwrite != 14 ) {
+	 syslog(LOG_ERR, "setmode failed\n");
+       }
+     }
+   }
+   else {
+      syslog(LOG_ERR, "RFXTRX version query returned 0x%02x\n", inbuf[0]);
+      return 1;
+   }
+ 
+   return 0;
+}
+
+/*-------------------------------------------------------------+
  | Configure an RFXCOM mode. When sent the 2-byte configure    |
  | code, e.g., 0xF029 for W800 emulation mode, it should       |
  | respond with the ack byte, e.g., 0x29.                      |
@@ -225,12 +346,10 @@ unsigned char configure_rfxcom ( unsigned short code )
    unsigned char inbuf[4];
    unsigned char outbuf[4];
 
-   int ignoret;
-
    outbuf[0] = (code >> 8) & 0xffu;
    outbuf[1] = code & 0xffu;
 
-   ignoret = write(tty_aux, (char *)outbuf, 2);
+   (void) write(tty_aux, (char *)outbuf, 2);
 
    if ( sxread(tty_aux, inbuf, 1, 1) <= 0 ) 
       return 0xffu;
@@ -243,16 +362,48 @@ unsigned char configure_rfxcom ( unsigned short code )
  +-------------------------------------------------------------*/
 int configure_rf_receiver ( unsigned char auxdev )
 {
-   unsigned char  inbuf[8], mver = 0xff, sver = 0xff;
+  unsigned char  inbuf[8], mver = 0xff, hwtype = 0, sver = 0xff;
    unsigned short rtn, crtn;
    int            is_config;
    int            j;
    char           *receiver;
    extern int     config_tty_dtr_rts ( int, unsigned char );
+   char           message[80];
 
    /* Nothing required for W800RF32 or MR26A */
    if ( auxdev == DEV_W800RF32 || auxdev == DEV_MR26A )
       return 0;
+
+   /* RFXTRX receiver */
+   if ( auxdev == DEV_RFXTRX ) {
+     /* Get the RFXCOM firmware versions */
+     /* reset and get status */
+     rfxtrx_version(&mver, &hwtype);
+     if ( mver > 0  ) {
+       switch (hwtype) {
+       case 0x50: receiver = "310Mhz"; break;
+       case 0x51: receiver = "315Mhz"; break;
+       case 0x52: receiver = "433.92Mhz rec-only"; break;
+       case 0x53: receiver = "433.92Mhz transceiver"; break;
+       case 0x55: receiver = "868.00Mhz"; break;
+       case 0x56: receiver = "868.00Mhz FSK"; break;
+       case 0x57: receiver = "868.30Mhz"; break;
+       case 0x58: receiver = "868.30Mhz FSK"; break;
+       case 0x59: receiver = "868.35Mhz"; break;
+       case 0x5A: receiver = "868.35Mhz FSK"; break;
+       case 0x5B: receiver = "868.95Mhz"; break;
+       default: receiver = "unknown";
+       }
+       sprintf(message, "RFXTRX hardware: %s, firmware version: %d", receiver,mver);
+       syslog(LOG_ERR, "%s", message);
+       display_aux_message(message);
+       return 0;
+     }
+     else {
+       syslog(LOG_ERR, "RFXTRX not configured (no firmware version received\n");
+       return 1;
+     }
+   }
 
    /* Configuration below is for RFXCOM receivers */
 
@@ -385,6 +536,7 @@ int rf_parms (int rfword, unsigned char *hcode, unsigned char *ucode, unsigned c
    return 1;
 }
 
+
 /*-------------------------------------------------------------+
  | Determine what to do with standard X10 RF signal            |
  +-------------------------------------------------------------*/
@@ -437,8 +589,6 @@ int display_aux_message ( char *message )
    unsigned char buf[88];
    char writefilename[PATH_LEN + 1];
 
-   int   ignoret;
-
    static unsigned char template[7] = {
      0xff,0xff,0xff,0,ST_COMMAND,ST_MSG,0};
 
@@ -461,7 +611,7 @@ int display_aux_message ( char *message )
    buf[6] = size + 1;
    buf[3] = size + 1 + 3;
 
-   ignoret = write(sptty, buf, size + 8);
+   (void) write(sptty, buf, size + 8);
 
    munlock(writefilename);
 
@@ -489,8 +639,6 @@ int forward_variable_aux_data ( unsigned char vl_type, unsigned char *buff, unsi
    char writefilename[PATH_LEN + 1];
    unsigned char sendbuf[80];
 
-   int ignoret;
-
    static unsigned char template[15] = {
     0xff,0xff,0xff,3,ST_COMMAND,ST_SOURCE,D_AUXRCV,
     0xff,0xff,0xff,0,ST_COMMAND,ST_VARIABLE_LEN,0,0};
@@ -508,12 +656,7 @@ int forward_variable_aux_data ( unsigned char vl_type, unsigned char *buff, unsi
    memcpy(sendbuf, template, sizeof(template));
    memcpy(sendbuf + sizeof(template), buff, length);
 
-   ignoret = write(sptty, sendbuf, sizeof(template) + length);
-
-#if 0
-   ignoret = write(sptty, template, 15);
-   ignoret = write(sptty, buff, length);
-#endif
+   (void) write(sptty, sendbuf, sizeof(template) + length);
 
    munlock(writefilename);
 
@@ -531,8 +674,6 @@ int forward_standard_aux_data ( unsigned char byte1, unsigned char byte2 )
    extern int sptty;
    char writefilename[PATH_LEN + 1];
 
-   int ignoret;
-
    static unsigned char template[13] = {
     0xff,0xff,0xff,3,ST_COMMAND,ST_SOURCE,D_AUXRCV,
     0xff,0xff,0xff,2,0,0};
@@ -546,7 +687,7 @@ int forward_standard_aux_data ( unsigned char byte1, unsigned char byte2 )
    template[11] = byte1;
    template[12] = byte2;
 
-   ignoret = write(sptty, template, 13);
+   (void) write(sptty, template, 13);
 
    munlock(writefilename);
 
@@ -563,8 +704,6 @@ int send_virtual_aux_data ( unsigned char address, unsigned char vdata,
    extern int sptty;
    char writefilename[PATH_LEN + 1];
 
-   int ignoret;
-
    static unsigned char template[20] = {
     0xff,0xff,0xff,3,ST_COMMAND,ST_SOURCE,D_AUXRCV,
     0xff,0xff,0xff,9,ST_COMMAND,ST_VDATA,0,0,0,0,0,0,0};
@@ -583,7 +722,7 @@ int send_virtual_aux_data ( unsigned char address, unsigned char vdata,
    template[18] = byte2;
    template[19] = byte3;
 
-   ignoret = write(sptty, template, 20);
+   (void) write(sptty, template, 20);
 
    munlock(writefilename);
 
@@ -600,8 +739,6 @@ int send_virtual_cmd_data ( unsigned char address, unsigned char vdata,
    extern int sptty;
    unsigned char source;
 
-   int ignoret;
-
    source = heyu_parent;
 
    static unsigned char template[20] = {
@@ -617,7 +754,7 @@ int send_virtual_cmd_data ( unsigned char address, unsigned char vdata,
    template[18] = byte2;
    template[19] = byte3;
 
-   ignoret = write(sptty, template, 20);
+   (void) write(sptty, template, 20);
 
    return 0;
 }
@@ -631,8 +768,6 @@ int forward_aux_longdata ( unsigned char vtype, unsigned char seq, unsigned char
    extern int sptty;
    char writefilename[PATH_LEN + 1];
    unsigned char sendbuf[80];
-
-   int ignoret;
 
    static unsigned char template[18] = {
     0xff,0xff,0xff,3,ST_COMMAND,ST_SOURCE,D_AUXRCV,
@@ -655,7 +790,7 @@ int forward_aux_longdata ( unsigned char vtype, unsigned char seq, unsigned char
    memcpy(sendbuf, template, sizeof(template));
    memcpy(sendbuf + sizeof(template), buff, nbytes);
 
-   ignoret = write(sptty, sendbuf, sizeof(template) + nbytes);
+   (void) write(sptty, sendbuf, sizeof(template) + nbytes);
 
    munlock(writefilename);
 
@@ -675,8 +810,6 @@ int forward_gen_longdata ( unsigned char vtype, unsigned char subtype, int nseq,
    char writefilename[PATH_LEN + 1];
    unsigned char outbuf[128];
    int  j;
-
-   int ignoret;
 
    static unsigned char template[19] = {
     0xff,0xff,0xff,3,ST_COMMAND,ST_SOURCE,D_AUXRCV,
@@ -705,7 +838,7 @@ int forward_gen_longdata ( unsigned char vtype, unsigned char subtype, int nseq,
       template[17] = (unsigned char)(j + 1);
       memcpy(outbuf, template, (sizeof(template)));
       memcpy(outbuf + (sizeof(template)), buff, nbytes);
-      ignoret = write(sptty, (char *)outbuf, (sizeof(template)) + nbytes);
+      (void) write(sptty, (char *)outbuf, (sizeof(template)) + nbytes);
    }
 
    munlock(writefilename);
@@ -850,6 +983,8 @@ int rfxmeter_checksum ( unsigned char *buf )
    chksum = (chksum - 0x0fu) & 0x0fu;
 
 #ifdef HASRFXM
+   if ( configp->auxdev == DEV_RFXTRX ) /* chksum not used for rfxtrx */
+     return 0;
    return (int)chksum;
 #else
    return (int)0xffu;
@@ -871,6 +1006,8 @@ int rfxsensor_checksum ( unsigned char *buf )
 //   chksum &= 0x0fu;
 
 #ifdef HASRFXS
+   if ( configp->auxdev == DEV_RFXTRX )
+     return 0x00;
    return (int)chksum;
 #else
    return (int)0xffu;
@@ -962,7 +1099,7 @@ enum {MinCount, RepCount, MaxCount, FloodRep};
 int aux_w800 ( void )
 {
    unsigned char  type;
-   unsigned char  hcode, ucode, fcode, rfflood, addr;
+   unsigned char  hcode, ucode, fcode, rfflood;
    unsigned char  buff[8];
    unsigned long  in_a_row, max_in_a_row;
    unsigned int   saddr = 0xffff;
@@ -1156,8 +1293,8 @@ int aux_w800 ( void )
          }
          else if ( type == RF_DUSK || type == RF_SECX ) {
             if ( count == mincount /*config.aux_repcounts[MinCount]*/ ) {
-               addr = rf2hcode[buff[0] >> 4] << 4;
-//               send_virtual_aux_data(addr, buff[2], type, buff[0], 0, 0, 0);
+	      //  addr = rf2hcode[buff[0] >> 4] << 4;
+	      //  send_virtual_aux_data(addr, buff[2], type, buff[0], 0, 0, 0);
                send_virtual_aux_data(buff[0], buff[2], type, buff[0], 0, 0, 0);
             }
          }
@@ -1196,8 +1333,8 @@ int aux_w800 ( void )
                send_virtual_aux_data(0, buff[2], type, buff[0], 0, 0, 0);
             }
             else if ( type == RF_DUSK || type == RF_SECX ) {
-               addr = rf2hcode[buff[0] >> 4] << 4;
-//               send_virtual_aux_data(addr, buff[2], type, buff[0], 0, 0, 0);
+	      // addr = rf2hcode[buff[0] >> 4] << 4;
+	      // send_virtual_aux_data(addr, buff[2], type, buff[0], 0, 0, 0);
                send_virtual_aux_data(buff[0], buff[2], type, buff[0], 0, 0, 0);
             }
             else if ( type == RF_XSENSOR ) {
@@ -1735,12 +1872,11 @@ int aux_rfxcomvl ( void )
 int aux_rfxcomvl ( void )
 {
    unsigned char  type, subindx, subtype, trulen;
-   unsigned char  hcode, ucode, fcode, rfflood, nbits, addr, xmtr, rcvr;
+   unsigned char  hcode, ucode, fcode, rfflood, nbits, xmtr, rcvr;
    unsigned char  xbuff[64], *buff;
    unsigned char  lastbuff[64];
    unsigned short sensor = 0;
    unsigned long  saddr;
-//   unsigned int   visaddr;
    unsigned char  sensor_flag = 0;
    unsigned long  in_a_row, max_in_a_row;
    long           rfword;
@@ -2071,8 +2207,8 @@ int aux_rfxcomvl ( void )
          }
          else if ( type == RF_DUSK || type == RF_SECX ) {
             if ( count == mincount /*config.aux_repcounts[MinCount]*/ ) {
-               addr = rf2hcode[buff[0] >> 4] << 4;
-//               send_virtual_aux_data(addr, buff[2], type, buff[0], 0, 0, 0);
+	      // addr = rf2hcode[buff[0] >> 4] << 4;
+	      // send_virtual_aux_data(addr, buff[2], type, buff[0], 0, 0, 0);
                send_virtual_aux_data(buff[0], buff[2], type, buff[0], 0, 0, 0);
             }
          }
@@ -2140,8 +2276,8 @@ int aux_rfxcomvl ( void )
                send_virtual_aux_data(0, buff[2], type, buff[0], 0, 0, 0);
             }
             else if ( type == RF_DUSK || type == RF_SECX ) {
-               addr = rf2hcode[buff[0] >> 4] << 4;
-//               send_virtual_aux_data(addr, buff[2], type, buff[0], 0, 0, 0);
+	      // addr = rf2hcode[buff[0] >> 4] << 4;
+	      // send_virtual_aux_data(addr, buff[2], type, buff[0], 0, 0, 0);
                send_virtual_aux_data(buff[0], buff[2], type, buff[0], 0, 0, 0);
             }
             else if ( type == RF_OREGON || type == RF_ELECSAVE || type == RF_OWL ) {
@@ -2179,6 +2315,301 @@ int aux_rfxcomvl ( void )
    return 0;
 }
 #endif  /* RFXCOM_DUAL */
+
+/*-------------------------------------------------------------+
+ | Process data read from the RFXTRX receiver on the TTY_AUX   |
+ | serial port and send to spoolfile and/or interface per cnfg |
+ +-BBBBB------------------------------------------------------------*/
+int aux_rfxtrx ( void )
+{
+   unsigned char  type, subindx, subtype, trulen;
+   unsigned char  hcode, ucode, fcode, rfflood;
+   unsigned char  xbuff[64], *buff;
+   unsigned char  nbuff[16];
+   //   unsigned short saddr;
+   unsigned long  saddr;
+   unsigned long  in_a_row, max_in_a_row;
+   int            nseq;
+   int            bufflen, nread = 0;
+   int            is_idle = 0;
+   int            is_err = 0;
+   int            use_old_buffer = 0;
+   char           restartfile[PATH_LEN + 1];
+   struct stat    statbuf;
+   extern void    aux_local_setup ( void );
+   int            configure_rf_receiver ( unsigned char );
+   int            send_rfxtype_message ( char, unsigned char );
+   int            send_rfxsensor_ident ( unsigned short, unsigned char * );
+   double         val;
+   //   char           message[80];
+
+
+   buff = xbuff + 1;
+
+   type = 0;
+   subindx = 0;
+   trulen = 0;
+   nseq = 0;
+   nread = 0;
+   is_idle = 0;
+   in_a_row = 0;
+   rfflood = 0;
+   max_in_a_row = config.aux_repcounts[MaxCount];
+   
+   strncpy2(restartfile, pathspec(RESTART_AUX_FILE), PATH_LEN);
+   unlink(restartfile);
+
+   openlog( "heyu_aux", 0, LOG_DAEMON);
+
+   configure_rf_receiver(config.auxdev);
+
+
+   while ( 1 )  {
+      /* Check if restart needed */
+      if ( is_idle && stat(restartfile, &statbuf) == 0 && is_err == 0 ) {
+         if ( reread_config() != 0 /* || configure_rf_receiver(config.auxdev) != 0 */ ) {
+            is_err = 1;
+            syslog(LOG_ERR, "aux reconfiguration failed!\n");
+            write_restart_error(restartfile);
+         }
+         else {
+            syslog(LOG_ERR, "aux reconfiguration-\n");
+            unlink(restartfile);
+            return 0;
+         }
+      }
+
+      if ( !use_old_buffer && sxread(tty_aux, xbuff, 1, 1) == 0 ) {
+         is_idle = 1;
+         nread = 0;
+         in_a_row = 0;
+         max_in_a_row = config.aux_repcounts[MaxCount];
+         if ( max_in_a_row > 0 && rfflood > 0 )
+            send_rf_flood_message(0); /* End of flood */
+         rfflood = 0;
+         xbuff[0] = 0;
+         continue;
+      }
+
+
+      /* 1st byte is count nr of bytes per spec */
+      bufflen = xbuff[0];
+
+      while ( nread < bufflen && sxread(tty_aux, buff + nread, 1, 1) ) {
+         nread++;
+      }
+      //      syslog(LOG_ERR, "aux bufflen=%d, nread=%d, buff[0]=0x%02x, buff[1]=0x%02x --\n", bufflen, nread,buff[0],buff[1]);
+      if ( nread < bufflen ) {
+         is_idle = 1;
+         nread = 0;
+         xbuff[0] = 0;
+         in_a_row = 0;
+         max_in_a_row = config.aux_repcounts[MaxCount]; /* XXXX repcount not used*/
+         if ( max_in_a_row > 0 && rfflood > 0 )
+            send_rf_flood_message(0); /* End of flood */
+         rfflood = 0;
+         continue;
+      }
+      is_idle = 0;
+
+      /* Check for a continuous flood of RF inputs without a break */
+      if ( max_in_a_row > 0 && ++in_a_row == max_in_a_row ) {
+         rfflood = 1;
+         send_rf_flood_message(SEC_FLOOD);
+         max_in_a_row *= config.aux_repcounts[FloodRep];
+         if ( max_in_a_row > ABSMAX_IN_A_ROW ) {
+            max_in_a_row = ABSMAX_IN_A_ROW;
+            in_a_row = 0;
+         }
+         continue;
+      }
+
+      /* Check RFXTRX type/subtype for known/supported values */
+      if ( bufflen == 7 && buff[0] == 0x10 ) { /* Lighting1 */
+	type = RF_STD;
+      }
+      else if ( bufflen == 8 && buff[0] == 0x20 ) { /* Security1 */
+	type = RF_SEC16;
+	saddr = buff[5] << 8 | buff[3]; /* TODO check this */
+      }
+      else if ( bufflen == 10 && buff[0] == 0x71 ) { /* RFXMeter */
+	type = RF_XMETER;
+      }
+      else if ( bufflen ==  7 && buff[0] == 0x70 ) { /* RFXSensor */
+	type = RF_XSENSOR;
+      }
+      else if ( bufflen ==  8 && buff[0] == 0x50 ) { /* (Oregon) TEMP */
+	type = RF_OREGON;
+	nbuff[0]= 56;
+	nbuff[1]= 0xea;     /* ea ea is special rfxtrx pseudo ORE_T2 */
+	nbuff[2]= 0xea;
+	nbuff[7]= buff[7] ; /* batt+ rflevel   */
+      }
+      else if ( bufflen ==  10 && buff[0] == 0x52 ) { /* (Oregon) TempHumidity */
+	type = RF_OREGON;
+	nbuff[0]= 72;
+	nbuff[1]= 0xea;     /* ea eb is special rfxtrx pseudo ORE_TH */
+	nbuff[2]= 0xeb;
+	nbuff[7]= buff[9] ; /* batt+ rflevel */
+	nbuff[8]= buff[7] ; /* humidity      */
+	nbuff[9]= buff[8] ; /* hum status    */
+      }
+      else if ( bufflen ==  11 && buff[0] == 0x55 ) { /* Oregon Rain */
+	type = RF_OREGON;
+	nbuff[0]= 88;
+	nbuff[1]= 0xea;      /* ea ec is special rfxtrx pseudo ORE_RAIN */
+	nbuff[2]= 0xec;
+	nbuff[7]= buff[10];  /* batt+ rflevel */
+	nbuff[8]= buff[7];   /* rain_tot1     */
+	nbuff[9]= buff[8];   /* rain_tot2     */
+	nbuff[10]= buff[9];  /* rain_tot3     */
+	nbuff[11]= buff[1];  /* subtype       */
+      }
+      else if ( bufflen ==  16 && buff[0] == 0x56 ) { /* Oregon Wind */
+	type = RF_OREGON;
+	nbuff[0]= 88;
+	nbuff[1]= 0xea;      /* ea ed is special rfxtrx pseudo ORE_WIND */
+	nbuff[2]= 0xed;
+	nbuff[7]= buff[15];  /* batt+ rflevel */
+	nbuff[8]= buff[7];   /* av_speedhigh  */
+	nbuff[9]= buff[8];   /* av_speedlow   */
+	nbuff[10]= buff[9];  /* gusthigh      */
+	nbuff[11]= buff[10]; /* gustlow       */
+      }
+      else if ( bufflen ==  9 && buff[0] == 0x57 ) { /* Oregon UV */
+	type = RF_OREGON;
+	nbuff[0]= 56;       /* note we don't support UV3:TFA temp readings */
+	nbuff[1]= 0xea;     /* ea ee is special rfxtrx pseudo ORE_UV */
+	nbuff[2]= 0xee;
+	nbuff[7]= buff[9];  /* batt+ rflevel */
+      }
+      else if ( bufflen ==  9 && buff[0] == 0x40 ) { /* Digimax */
+	type = RF_DIGIMAX;
+      }
+      else if ( bufflen ==  11 && buff[0] == 0x11 && buff[1] == 00 ) {
+	/* Lighting2 AC */
+	type = RF_KAKU;
+      }
+      else
+	type = -1;
+
+      if ( (config.disp_raw_rf & DISPMODE_RF_NORMAL) && !use_old_buffer ) {
+            forward_variable_aux_data(RF_RAWVL, xbuff, bufflen + 1);
+      }
+      use_old_buffer = 0;
+
+      nread = 0;
+      if ( type == RF_STD ) { /* X10 */
+	hcode = trx2hucode[(buff[3] - 0x41) % 16];
+	ucode = trx2hucode[(buff[4] - 1 ) % 16];
+	fcode = rf_trx2heyu[buff[5]];   /* TODO assumes buff[5] <=7 */
+	//  syslog(LOG_ERR, "aux hcode=%d, ucode=%d, fcode=%d --\n", hcode,ucode,fcode);
+	proc_type_std(hcode, ucode, fcode);
+      }
+      else if ( type == RF_SEC16 ) {
+	fcode= trx2secu[(buff[6] & 0x7f) % 20];
+	if ( buff[6] & 0x80 ) {
+	  fcode = fcode | 0x40; /* tamper bit set */
+	}
+	if ( (buff[7] & 0x0f) == 0 ) { 
+	  fcode = fcode | 0x01; /* batt low */
+	}
+	send_virtual_aux_data(0, fcode, RF_SEC, buff[3], buff[5], 0, 0);
+      }
+      else if ( type == RF_SEC || type == RF_ENT || type == RF_XJAM ) {
+	send_virtual_aux_data(0, buff[2], type, buff[0], 0, 0, 0);
+      }
+      else if ( type == RF_XMETER ) {
+	/* Construct same buffer as used in RFXCOM */
+	nbuff[0] = buff[3];
+	nbuff[1] = buff[4];
+	nbuff[2] = buff[7];
+	nbuff[3] = buff[8];
+	nbuff[4] = buff[6];
+	nbuff[5] = ((buff[1] & 0x0f) << 4) /* + checksum */;
+	forward_aux_longdata(type, 0, 0, nbuff[0], 6, nbuff);
+      }
+      else if ( type == RF_XSENSOR ) {
+	/* Construct same buffer as used in RFXCOM */
+	nbuff[0] = buff[3] * 4 + buff[1];
+	nbuff[1] = (nbuff[0] & 0x0f) | ((nbuff[0]&0xf0) ^ 0xf0);
+	if ( buff[1] == 0x03 ) { /* subtype msg */
+	  nbuff[2] = buff[5];
+	  nbuff[3] = 0x10; /* set flag */
+	}
+	else if ( buff[1] == 0x00 ) { /* Temperature */
+	  val = (((buff[4] & 0x7f) << 8) | buff[5]) * 2.56;
+	  val += 7; /* rounding correction */
+	  nbuff[2] = ((unsigned) val & 0xff00) >> 8;
+	  if ( buff[4] & 0x80 ) { /* negative temp */
+	    nbuff[2] |= 0x80;
+	  }
+	  nbuff[3] = (unsigned) val & 0xe0;
+	}
+	else if ( buff[1] == 0x01 || buff[1] == 0x02 ) { /* Volt */
+	  nbuff[2] = buff[4] << 5 | ((buff[5] >> 3) & 0x1f); 
+	  nbuff[3] = (buff[5] & 0x07) << 5;
+	}
+	//   syslog(LOG_ERR, "aux nbuff 0..3 0x%02x %02x %02x %02x\n", nbuff[0],nbuff[1],nbuff[2],nbuff[3]);
+	send_virtual_aux_data(0, 0, type, nbuff[0], 0, nbuff[2], nbuff[3]);
+      }
+      else if ( type == RF_OREGON  ) {
+	if ( buff[1] <= 0x06 ) { /* Genuine Oregon this field is channel */
+	  nbuff[3]= buff[4] ; /* id2=channel     */
+	} else {
+	  nbuff[3]= 0 ; /* we could use this as 2nd address byte  */
+	}
+	nbuff[4]= buff[3] ; /* id1=addr        */
+	nbuff[5]= buff[5] ; /* temphigh+sign, dirh-wind, rainrateh, uv */
+	nbuff[6]= buff[6] ; /* templow,       dirl-wind, rainratel, , */
+	if ( oretype(nbuff, &subindx, &subtype, &trulen, &saddr, &nseq) == 0 ) {
+	  if (is_ore_ignored(saddr)) {
+	    //sprintf(message, "aux oretype addr=0x%02x ignored\n", saddr);
+	    //display_aux_message(message);
+	  }
+	  else {
+	    forward_gen_longdata (type, subindx, nseq, 0, saddr, trulen, nbuff+1);
+	  }
+	}
+
+      }     
+      else if ( type == RF_DIGIMAX ) {
+	/* Construct same buffer as used in RFXCOM */
+	nbuff[0] = buff[4];
+	nbuff[1] = buff[3];
+	nbuff[2] = (buff[7] & 0x03) << 4;  /* + parity bits */
+	nbuff[3] = buff[5];
+	nbuff[4] = (buff[6] & 0x3f) | ((buff[7] & 0x80) >> 1);
+	nbuff[5] = 0; /* parity */
+	forward_digimax(nbuff);
+      }
+      else if ( type == RF_KAKU ) {
+	nbuff[0] = 7*8;
+	memcpy(nbuff+1, buff+3, 7);
+	forward_variable_aux_data(RF_KAKU, nbuff, 8);
+      }
+      else if ( type == RF_ELECSAVE || type == RF_OWL ) { /* Not implemented */
+	forward_gen_longdata (type, subindx, nseq, 0, saddr, trulen, buff);
+      }     
+      else if ( type == RF_DUSK || type == RF_SECX ) { 
+	/* RFXTRX doesn't appear to support RF_DUSK, RF_SECX is done via RF_SEC16 */
+	//addr = rf2hcode[buff[0] >> 4] << 4;
+	send_virtual_aux_data(buff[0], buff[2], type, buff[0], 0, 0, 0);
+      }
+      else if ( type == RF_XSENSORHDR ) { /* not sent by RFXTRX ! */
+	send_rfxtype_message((char)buff[2], buff[3]);
+      }
+      else {
+	rfxtrx_decode(buff, bufflen);
+      }
+      if ( config.disp_rf_rxlvl == YES ) {
+	forward_variable_aux_data(RF_RFXTRXLVL, xbuff, bufflen + 1);
+      }
+
+   }
+   return 0;
+} /* aux_rfxtrx EEEEE */
+
 
 /*-------------------------------------------------------------+
  | Process data read from the MR26A on the TTY_AUX serial      |
@@ -2342,8 +2773,6 @@ int verify_w800 ( void )
    unsigned char outbuf[4];
    int j, nread = 0;
 
-   int ignoret;
-
    outbuf[0] = 0xf0;
    outbuf[1] = 0x29;
 
@@ -2352,7 +2781,7 @@ int verify_w800 ( void )
    while ( sxread(tty_aux, inbuf, 1, 1) > 0 );
 
    for ( j = 0; j < 3; j++ ) {
-      ignoret = write(tty_aux, (char *)outbuf, 2);
+     (void) write(tty_aux, (char *)outbuf, 2);
       if ( (nread = sxread(tty_aux, inbuf, 1, 1)) > 0 &&
            inbuf[0] == 0x29u ) {
          syslog(LOG_ERR, "W800RF32 detected-\n");

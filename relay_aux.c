@@ -260,6 +260,7 @@ int c_start_aux ( char *tty_auxname )
    extern char *argptr;
    extern int ttylock(), lock_for_write(), munlock();
    extern int aux_w800(), aux_rfxcomvl(), aux_mr26a();
+   extern int aux_rfxtrx();
    extern int setup_tty_aux( int, int ), setup_sp_tty();
    extern PID_T lockpid( char * );
    PID_T was_locked;
@@ -368,6 +369,10 @@ int c_start_aux ( char *tty_auxname )
        else if ( configp->auxdev == DEV_RFXCOMVL ) {
           /* Process loop for data from the RFXCOM in variable length mode */
           aux_rfxcomvl();
+       }
+       else if ( configp->auxdev == DEV_RFXTRX ) {
+          /* Process loop for data from the RFXTRX */
+          aux_rfxtrx();
        }
        else {
           /* Process loop for data from the MR26A */

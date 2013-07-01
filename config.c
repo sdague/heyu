@@ -102,7 +102,7 @@ enum {
    StartEngine, IgnoreSilent, NoSwitch, RespoolPerms, SpoolMax,
    CheckRILine, RIdisable, SendRetries, ScriptCtrl, Transceive, TransMissp,
    RFForward, TransDim, StateCtrl, RFFuncMask, RingCtrl, AuxRepcounts,
-   AuxMincountRFX, HideUnchg, HideUnchgInactive, ShowChange, DispRFNoise, ArmMaxDelay, DispRawRF, ArmLogic,
+   AuxMincountRFX, HideUnchg, HideUnchgInactive, ShowChange, DispRFNoise, DispRFrxlvl, ArmMaxDelay, DispRawRF, ArmLogic,
    InactiveTimeout, HeyuUmask, AutoWait, FullBright, EnginePoll,
    RfxTscale, RfxVadscale, RfxBPscale, DispSubdir, RfxComDtrRts, RfxHiBaud,
    RfxPowerScale, RfxWaterScale, RfxGasScale, RfxPulseScale, RfxComEnable, RfxComDisable,
@@ -116,7 +116,7 @@ enum {
    OreChgBitsUV, ScanMode, RfxInline,
    OwlVoltage, OwlCalibPower, OwlCalibEnergy, OwlChgBitsPower, OwlChgBitsEnergy, OwlDispCount,
    ArmRemote, ActiveChange, InactiveHandling, ProcessXmit, ShowFlagsMode,
-   LaunchPathAppend, LaunchPathPrefix, FixStopStartError, TtyRFXmit, ChkSumTimeout
+   LaunchPathAppend, LaunchPathPrefix, FixStopStartError, TtyRFXmit, ChkSumTimeout, Rfxmodebytes,
    
 };
 
@@ -232,6 +232,7 @@ static struct conf {
    {"HIDE_UNCHANGED_INACTIVE", 2, 2, 0, 0, 0,    HideUnchgInactive},
    {"SHOW_CHANGE",          2, 2, 0, 0, 0,       ShowChange},
    {"DISPLAY_RF_NOISE",     2, 2, 0, 0, 0,       DispRFNoise},
+   {"DISPLAY_RF_RXLVL",     2, 2, 0, 0, 0,       DispRFrxlvl},
    {"ARM_MAX_DELAY",        2, 2, 0, 0, 0,       ArmMaxDelay},
    {"DISPLAY_RAW_RF",       2, 2, 0, 0, 0,       DispRawRF},
    {"ARM_LOGIC",            2, 2, 0, 0, 0,       ArmLogic},
@@ -316,6 +317,7 @@ static struct conf {
    {"LAUNCHPATH_PREFIX",    2, 2, 2, 0, 0,       LaunchPathPrefix},
    {"FIX_STOPSTART_ERROR",  2, 2, 0, 1, COVR,    FixStopStartError},
 //   {"CHKSUM_TIMEOUT",       2, 2, 0, 0, 0,       ChkSumTimeout},
+   {"RFX_MODE_BYTES",       5, 5, 0, 0, 0,       Rfxmodebytes},
    
 #if 0
    {"ELS_NUMBER",           2, 2, 0, 0, 0,       ElsNumber},
@@ -521,6 +523,7 @@ void initialize_config ( void )
    configp->hide_unchanged_inactive = DEF_HIDE_UNCHANGED_INACTIVE;
    configp->show_change = DEF_SHOW_CHANGE;
    configp->disp_rf_noise = DEF_DISP_RF_NOISE;
+   configp->disp_rf_rxlvl = DEF_DISP_RF_RXLVL;
    configp->arm_max_delay = DEF_ARM_MAX_DELAY;
    configp->disp_raw_rf = DEF_DISP_RAW_RF;
    configp->arm_logic = DEF_ARM_LOGIC;
@@ -624,6 +627,10 @@ void initialize_config ( void )
    configp->ttyrfxmit[0] = '\0';
    configp->rfxmit_freq = 0;
    configp->chksum_timeout = DEF_CHKSUM_TIMEOUT;
+   configp->rfx_modebytes[0] = 0;
+   configp->rfx_modebytes[1] = 0;
+   configp->rfx_modebytes[2] = 0;
+   configp->rfx_modebytes[3] = 0;
 
    return;
 }
@@ -1286,6 +1293,9 @@ int parse_config_tail ( char *buffer, unsigned char source )
 	    }
 	    else if ( strcmp(tokv[1], "RFXCOMVL") == 0 ) {
                configp->auxdev = DEV_RFXCOMVL;
+	    }
+	    else if ( strcmp(tokv[1], "RFXTRX") == 0 ) {
+               configp->auxdev = DEV_RFXTRX;
 	    }
 	    else {
 	       sprintf(errbuffer, "Unsupported aux device '%s'", tokv[1]);
@@ -2332,6 +2342,18 @@ int parse_config_tail ( char *buffer, unsigned char source )
             }
             break;
 
+         case DispRFrxlvl :
+            (void) strupper(tokv[0]);
+            if ( !strcmp(tokv[0], "YES") )
+               configp->disp_rf_rxlvl = YES;
+            else if ( !strcmp(tokv[0], "NO") )
+               configp->disp_rf_rxlvl = NO;
+            else {
+               store_error_message("DISPLAY_RF_RXLVL must be YES or NO");
+               errors++;
+            }
+            break;
+
          case ArmMaxDelay :
             if ( (longvalue = parse_hhmmss(tokv[0], 3)) >= 0 && longvalue < 43200 ) {
                configp->arm_max_delay = (int)longvalue;
@@ -3294,6 +3316,22 @@ int parse_config_tail ( char *buffer, unsigned char source )
             configp->chksum_timeout = longvalue;
             break;
 
+         case Rfxmodebytes :
+            for ( j = 0; j < 4; j++ ) {
+               value = (int)strtol(tokv[j], &sp, 0);
+               if ( strchr(" \t\n", *sp) == NULL || value < 0 ) {
+                  store_error_message("Invalid RFX_MODE_BYTES");
+                  errors++;
+                  break;
+               }
+               configp->rfx_modebytes[j] = value;
+            }
+            if ( configp->rfx_modebytes[0] < 0x50 || configp->rfx_modebytes[0] > 0x5f) { /* allow up to 0x5f for future expansion? */
+               store_error_message("RFX_MODE_BYTES, transceiver type valid range id 0x50..0x5B");
+               errors++;
+               break;
+            }
+            break;
          default :
             store_error_message("Unsupported config directive");
             errors++;

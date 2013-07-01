@@ -73,11 +73,12 @@ enum {
    OreWind1, OreWind2, OreWind3,
    OreUV1, OreUV2,
    OreDT1, OreElec1, OreElec2,
-   OreWeight1, OreWeight2
+   OreWeight1, OreWeight2,
+   OreRfxTemp, OreRfxTH, OreRfxWind, OreRfxRain, OreRfxUV,
 };
 
 unsigned char oretype ( unsigned char *, unsigned char *, unsigned char *, unsigned char *, unsigned long *, int * );
 char *translate_gen_longdata ( unsigned char *, unsigned char *, int * );
 char *translate_ore_emu ( unsigned char *, unsigned char *, int * );
 char *translate_oregon( unsigned char *, unsigned char *, int * );
-int is_ore_ignored ( unsigned int );
+int is_ore_ignored ( unsigned long );

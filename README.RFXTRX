@@ -1,0 +1,116 @@
+BASIC SETUP
+***********
+
+In your config file:
+
+  TTY_AUX         /dev/rfxtrx  RFXTRX
+  RFXCOM_HIBAUD YES
+
+In order to have always the same serial name I setup a udev rule so
+my transceiver always shows up as /dev/rfxtrx, add to existing or new
+file under /etc/udev/rules:
+# rfxtrx 
+SUBSYSTEMS=="usb", ATTRS{serial}=="<here your serial no>", ATTRS{idVendor}=="0403",ATTRS{idProduct}=="6001", SYMLINK+="rfxtrx", ENV{GENERATED}="1"
+[ Serial number you can find very easy using usbview-2.0 or look under /sys]
+
+
+MODE_CONFIG
+***********
+
+Have Heyu setup modes for receiving protocols can be done using config
+parameter:
+
+RFX_MODE_BYTES <transceiver type> <MASK1> <MASK2> <MASK3>
+
+[ If this parameter is NOT present in the config file, the transceiver
+  is simply reset and uses the values stored in EEPROM, so you'll have
+  to manually configure & store the correct mode/options using the windows
+  RFXmanager program.]
+
+Transceiver Type
+================
+Select receiver/transceiver frequency, the 4 RFXtrx types use
+different hardware. 
+It is, for example, not possible to select 315MHz in an RFXRFXtrx433!
+
+RFXRFXtrx315
+------------
+0x50 = 310MHz
+0x51 = 315MHz
+
+RFXrec433:
+----------
+0x52 = 433.92MHz
+
+RFXtrx433:
+----------
+0x53 = 433.92MHz
+
+RFXtrx868:
+----------
+0x55 = 868.00MHz
+0x56 = 868.00MHz FSK
+0x57 = 868.30MHz
+0x58 = 868.30MHz FSK
+0x59 = 868.35MHz
+0x5A = 868.35MHz FSK
+0x5B = 868.95MHz
+
+
+MASK1
+=====
+Set a bit to 1 to enable the protocol in the RFXtrx
+bit
+ 7
+ 6
+ 5
+ 4
+ 3 Lighting4
+ 2 FineOffset/Viking
+ 1 Rubicson
+ 0 AE Blyss
+
+MASK2
+=====
+bit
+ 7 Blinds T1/T2/T3/T4
+ 6 Blinds T0
+ 5 Proguard
+ 4 FS20
+ 3 La Crosse          (*) Reported via Oregon type sensors in Heyu
+ 2 Hideki/UPM	      (*) TS34C Reported via Oregon type sensors in Heyu 
+ 1 AD LightwaveRF
+ 0 Mertik
+
+MASK2
+=====
+bit
+ 7 Visonic
+ 6 ATI
+ 5 Oregon Scientific  (*) (**)
+ 4 Meiantech
+ 3 HomeEasy EU
+ 2 AC                 (*) KAKU
+ 1 ARC
+ 0 X10                (*)
+
+(*) Only ones currently supported in Heyu so mode bytes will be eg.
+
+for RFXTRX433
+  RFX_MODE_BYTES 0x53 0x00 0x0c 0x25
+for RFXTRX315
+  RFX_MODE_BYTES 0x51 0x00 0x0c 0x25 
+
+(**) For specific Oregon (and related) support see http://heyu.tclcode.com
+
+Other protocol/features
+***********************
+Next thing I'll probably add is basic (raw bytes) transmit support so I can
+actually control my KAKU modules.
+Adding other (oregon) sensor types isn't too difficult but without the
+appropiate hardware available to me, I'll need testers and active demand for 
+supporting them.
+
+
+__
+Dave jan-2013 contact via http://tech.groups.yahoo.com/group/heyu_users/

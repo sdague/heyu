@@ -11,7 +11,7 @@ This page contains information about the capability of Heyu to receive
 and process signals from RF remotes and sensors using a WGL W800RF32A, an
 X-10 MR26A, or an RFXCOM X10 RF receiver connected to a second serial port,
 or an RFXLAN network version of the RFXCOM connected to a local network.
-
+Initial support for the new RFXCOM RFXTRX has been added.
 .SH HARDWARE
 The W800RF32A is manufactured by WGL & Associates (http://www.wgldesigns.com).
 Two models are available - the US/Canada model operates at a frequency
@@ -47,7 +47,17 @@ capability.
 The RFXLAN version of the RFXCOM receiver connects to a local network
 and is accessible over a TCP socket. Its optional transmitter part, if present,
 is not supported.
-
+.PP
+The RFXTRX is currently supported in receive only (no transmit option)
+mode and using the X-10, La Crosse & Oregon & AC (KAKU) modes (which
+covers among others X-10/X10-security/RFXSensor/RFXMeter/Oregon+LaCrosse
+Temp sensors). This transceiver is actually hiding the raw bits sent
+from remote RF units and does filtering and presentation in firmware. 
+That means not all raw bits are available but decoding in heyu is much
+simpler and to filtering for duplicate transmissions is not needed.
+Also it combines all types of sensors into a 
+single type (eg. Oregon types/La Crosse/Viking/TFA are all 
+reported in simular way and are now all supported in heyu).
 .SH QUICK START
 Stop Heyu (if already running) with the command 'heyu stop'.
 Plug a W800RF32A/AE or MR26A receiver into a serial port.  Or plug an RFXCOM
@@ -481,7 +491,8 @@ will result in a signal being transceived or sent to the
 heyu_engine on the 1st, 9th, 17th, ..., 193rd burst. Then
 RF Flood messages will be sent on the 200th, 400th, 800th,
 etc., burst.
-
+.PP
+Note that RFXTRX does most of this in firmware and thus AUX_REPCOUNTS has NO effect.
 .PP
 SUPPRESS_RFXJAM directive
 .br
@@ -525,6 +536,12 @@ choices are the default "NONE" to not display any raw
 data, "NOISE" to display data which heyu_aux judges to be
 RF noise, or "ALL" to display both noise and normal raw
 RF data.
+.PP
+DISPLAY_RF_RXLVL directive
+.br
+This directive instructs Heyu whether or not to display
+the Signal Strength receive level from an RFXTRX transceiver.
+Defaults to "NO", change to "YES" to debug missed/missing RF receptions.
 .br
 
 The display of raw data is in addition to the normal

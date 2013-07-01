@@ -162,6 +162,9 @@ Temperature sensors:
   ORE_T2 :  Radio Shack P/N 63-1091 Projection Weather/Clock
 .br
   ORE_T3 :  THWR800 (Alpha)
+.br
+
+When using an RFXTRX transceiver, all these will be reported as ORE_RFXTEMP. Even other brands like La Crosse will be reported as ORE_RFXTEMP. When upgrading from an RFXCOM receiver you'll have to update your config file to accomodate for this change.
 .PP
 Temperature / Humidity sensors:
 .br
@@ -176,6 +179,9 @@ Temperature / Humidity sensors:
   ORE_TH5 : WTGR800
 .br
   ORE_TH6 : THGR918 THGR918N THGRN228NX
+.br
+
+When using an RFXTRX transceiver, all these will be reported as ORE_RFXTH (same remark for ORE_RFXTEMP applies)
 .PP
 Temperature / Humidity / Barometric Pressure sensors:
 .br
@@ -194,6 +200,9 @@ Wind sensors
   ORE_WIND2 : WGR800   (In Oregin model WMR80A Weather Station bundle)
 .br
   ORE_WIND3 : WGR918N  (In Oregin model WMR928N Weather Station bundle)
+.br
+
+When using an RFXTRX transceiver, all these will be reported as ORE_RFXWIND (same remark for ORE_RFXTEMP applies)
 .PP
 Rain sensors
 .br
@@ -202,6 +211,9 @@ Rain sensors
   ORE_RAIN2 : PCR800   (In Oregon model WMR80A Weather Station bundle)
 .br
   ORE_RAIN3 : (Alpha)
+.br
+
+When using an RFXTRX transceiver, all these will be reported as ORE_RFXRAIN (same remark for ORE_RFXTEMP applies)
 .PP
 UV sensors
 .br
@@ -714,7 +726,7 @@ Directive ORE_RAINRATESCALE  <units_label>  <scale_factor>
 Directive ORE_RAINTOTSCALE  <units_label>  <scale_factor>
 .br
 By default the rainfall rate and total rainfall are displayed in the
-native units, which for the Rain1 protocol is mm(/hr) while for the
+native units, which for the Rain1 & RfxRain protocols is mm(/hr) while for the
 others it is inches(/hr).  This directives allow display in any
 arbitrary units by providing the name for the units and the scale
 factor by which the native units are multiplied to convert to the

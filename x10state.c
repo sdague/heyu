@@ -1617,13 +1617,18 @@ int c_logmsg ( int argc, char *argv[] )
 char *display_variable_aux_data ( unsigned char *buff )
 {
    static char outbuf[120];
-   int         j;
+   int         j, lvl;
 
    if ( buff[2] == RF_NOISEVL ) {
       sprintf(outbuf, "func %12s : Data (hex)", "RFnoise");
    }
    else if ( buff[2] == RF_RAWVL ) {
       sprintf(outbuf, "func %12s : Data (hex)", "RFrawdata");
+   }
+   else if ( buff[2] == RF_RFXTRXLVL ) { /* lvl in last byte high nibble */
+     j = buff[3]; lvl = (buff[j+4-1] & 0xf0) >> 4;
+     sprintf(outbuf, "func %12s : Received Signal strength %d/15", "RFrxsignal", lvl);
+      return outbuf;
    }
    else {
       sprintf(outbuf, "func %12s : Data (hex)", "RFunknown");
